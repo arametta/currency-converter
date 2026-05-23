@@ -1,9 +1,9 @@
 package com.nosto.currencyconverter.controller;
 
 import com.nosto.currencyconverter.client.ExchangeRateUnavailableException;
+import com.nosto.currencyconverter.client.UnknownCurrencyException;
 import com.nosto.currencyconverter.model.ErrorResponse;
 import com.nosto.currencyconverter.service.ConversionMetrics;
-import com.nosto.currencyconverter.service.UnknownCurrencyException;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

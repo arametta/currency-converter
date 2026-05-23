@@ -13,17 +13,16 @@ import org.springframework.stereotype.Component;
  *
  * Why is this a separate bean instead of a method on CurrencyConversionService?
  * Spring's @Cacheable is implemented via AOP proxies. Self-invocation —
- * e.g. CurrencyConversionService.convert() calling this.getExchangeRate() —
+ * e.g. CurrencyConversionService.convert() calling this.getEurRate() —
  * goes through the actual object reference, not the proxy, so the cache
  * advice never fires. Putting the @Cacheable method on a separate Spring bean
  * means CurrencyConversionService always reaches it through the proxy, and
  * the cache works as intended.
  *
- * This is a small deviation from the literal spec ("annotate the method in
- * CurrencyConversionService that calls SwopClient") needed to make the cache
- * actually function. The behaviour the spec asks for — cache the rate by
- * currency pair with 5-minute TTL, do not cache the full conversion — is
- * preserved exactly.
+ * Cache key is a single currency code (e.g. "USD"), not a pair. Since every
+ * lookup is anchored on EUR, the same EUR-based rate is reusable across any
+ * pair involving that currency. After USD→GBP populates "USD" and "GBP",
+ * a subsequent USD→EUR or GBP→USD is satisfied entirely from cache.
  */
 @Component
 public class ExchangeRateProvider {
@@ -44,12 +43,12 @@ public class ExchangeRateProvider {
      * for "swop.cx response time": we don't want sub-millisecond cache hits
      * polluting the latency distribution.
      */
-    @Cacheable(value = "exchangeRates", key = "#baseCurrency + '_' + #quoteCurrency")
-    public BigDecimal getExchangeRate(String baseCurrency, String quoteCurrency) {
-        log.debug("Cache miss — fetching {}/{} from swop.cx", baseCurrency, quoteCurrency);
+    @Cacheable(value = "exchangeRates", key = "#currencyCode")
+    public BigDecimal getEurRate(String currencyCode) {
+        log.debug("Cache miss — fetching EUR/{} from swop.cx", currencyCode);
         Timer.Sample sample = metrics.startSwopTimer();
         try {
-            return swopClient.getExchangeRate(baseCurrency, quoteCurrency);
+            return swopClient.getEurRate(currencyCode);
         } finally {
             // Recorded for both success and failure paths — failure latency
             // is just as useful as success latency for monitoring.

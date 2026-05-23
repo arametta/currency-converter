@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.nosto.currencyconverter.model.SwopRateResponse;
@@ -42,29 +44,59 @@ class SwopClientTest {
         client = new SwopClient(restTemplate, "https://swop.cx", "test-key");
     }
 
+    // ---- EUR short-circuit ------------------------------------------------
+
+    @Test
+    void getEurRateForEur_returnsOneWithoutHttpCall() {
+        BigDecimal rate = client.getEurRate("EUR");
+
+        assertThat(rate).isEqualByComparingTo(BigDecimal.ONE);
+        verify(restTemplate, never()).exchange(any(String.class), any(HttpMethod.class),
+                any(HttpEntity.class), eq(SwopRateResponse.class));
+    }
+
+    // ---- success ----------------------------------------------------------
+
     @Test
     void successfulResponse_isDeserialisedAndRateReturned() {
-        SwopRateResponse body = new SwopRateResponse("USD", "EUR", new BigDecimal("0.92"), "2026-05-23");
+        SwopRateResponse body = new SwopRateResponse(
+                "EUR", "USD", new BigDecimal("1.08"), "2026-05-23");
         when(restTemplate.exchange(
-                contains("/rest/rates/USD/EUR"),
+                contains("/rest/rates/EUR/USD"),
                 eq(HttpMethod.GET),
                 any(HttpEntity.class),
                 eq(SwopRateResponse.class)))
                 .thenReturn(ResponseEntity.ok(body));
 
-        BigDecimal rate = client.getExchangeRate("USD", "EUR");
+        BigDecimal rate = client.getEurRate("USD");
 
-        assertThat(rate).isEqualByComparingTo("0.92");
+        assertThat(rate).isEqualByComparingTo("1.08");
+    }
+
+    // ---- failure translation ---------------------------------------------
+
+    @Test
+    void notFound_throwsUnknownCurrencyException() {
+        // 404 specifically means "swop.cx doesn't support this currency".
+        // Caller sees 422, not 503 — the upstream is fine, the input isn't.
+        when(restTemplate.exchange(any(String.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SwopRateResponse.class)))
+                .thenThrow(HttpClientErrorException.create(
+                        HttpStatus.NOT_FOUND, "Not Found", null, null, null));
+
+        assertThatThrownBy(() -> client.getEurRate("XTS"))
+                .isInstanceOf(UnknownCurrencyException.class);
     }
 
     @Test
-    void clientError_throwsExchangeRateUnavailable() {
+    void otherClientError_throwsExchangeRateUnavailable() {
+        // 401 (bad API key), 429 (rate-limited), etc. all funnel here.
         when(restTemplate.exchange(any(String.class), eq(HttpMethod.GET), any(HttpEntity.class),
                 eq(SwopRateResponse.class)))
                 .thenThrow(HttpClientErrorException.create(
                         HttpStatus.UNAUTHORIZED, "Unauthorized", null, null, null));
 
-        assertThatThrownBy(() -> client.getExchangeRate("USD", "EUR"))
+        assertThatThrownBy(() -> client.getEurRate("USD"))
                 .isInstanceOf(ExchangeRateUnavailableException.class);
     }
 
@@ -75,7 +107,7 @@ class SwopClientTest {
                 .thenThrow(HttpServerErrorException.create(
                         HttpStatus.INTERNAL_SERVER_ERROR, "Boom", null, null, null));
 
-        assertThatThrownBy(() -> client.getExchangeRate("USD", "EUR"))
+        assertThatThrownBy(() -> client.getEurRate("USD"))
                 .isInstanceOf(ExchangeRateUnavailableException.class);
     }
 
@@ -86,7 +118,7 @@ class SwopClientTest {
                 eq(SwopRateResponse.class)))
                 .thenThrow(new ResourceAccessException("Read timed out"));
 
-        assertThatThrownBy(() -> client.getExchangeRate("USD", "EUR"))
+        assertThatThrownBy(() -> client.getEurRate("USD"))
                 .isInstanceOf(ExchangeRateUnavailableException.class);
     }
 
@@ -97,7 +129,7 @@ class SwopClientTest {
                 eq(SwopRateResponse.class)))
                 .thenReturn(ResponseEntity.ok(null));
 
-        assertThatThrownBy(() -> client.getExchangeRate("USD", "EUR"))
+        assertThatThrownBy(() -> client.getEurRate("USD"))
                 .isInstanceOf(ExchangeRateUnavailableException.class);
     }
 }

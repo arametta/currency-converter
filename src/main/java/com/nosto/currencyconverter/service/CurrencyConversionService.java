@@ -1,5 +1,6 @@
 package com.nosto.currencyconverter.service;
 
+import com.nosto.currencyconverter.client.UnknownCurrencyException;
 import com.nosto.currencyconverter.model.ConversionRequest;
 import com.nosto.currencyconverter.model.ConversionResponse;
 import java.math.BigDecimal;
@@ -14,16 +15,35 @@ import org.springframework.stereotype.Service;
 
 /**
  * Orchestrates a single conversion: normalise → validate codes → short-circuit
- * same-currency → fetch rate (cached) → multiply → format → respond.
+ * same-currency → fetch EUR-based rates (cached) → cross-rate → format → respond.
  *
- * All cache and normalisation decisions live here. The controller knows nothing
- * about either, and the client knows nothing about caching or currency
- * normalisation. Single responsibility, top to bottom.
+ * Because the swop.cx free tier only supports EUR as the base currency, every
+ * upstream lookup is anchored on EUR. For an arbitrary source → target pair
+ * the effective rate is derived from the two EUR-based rates:
+ *
+ *     effectiveRate = eurToTarget / eurToSource
+ *     convertedAmount = amount * effectiveRate
+ *
+ * The three cases reduce to the same formula:
+ *   - EUR → X : eurToSource = 1, so effectiveRate = eurToTarget
+ *   - X → EUR : eurToTarget = 1, so effectiveRate = 1 / eurToSource
+ *   - X → Y  : general case, both rates fetched (cache hit on either side
+ *               after the first lookup for that currency)
+ *
+ * All cache, normalisation, and cross-rate decisions live here. The controller
+ * knows nothing about any of this, and the client knows nothing about caching,
+ * cross-rates, or currency normalisation.
  */
 @Service
 public class CurrencyConversionService {
 
     private static final Logger log = LoggerFactory.getLogger(CurrencyConversionService.class);
+
+    // Intermediate precision for the EUR-based division. The result is later
+    // re-scaled to the target currency's default fraction digits, so we just
+    // need enough head-room here that the rounding step at the end isn't
+    // distorted by truncation in the division. 10 dp is comfortable.
+    private static final int CROSS_RATE_SCALE = 10;
 
     // Calling a separate bean (rather than a method on `this`) is required for
     // @Cacheable to fire — see ExchangeRateProvider for the explanation.
@@ -66,18 +86,26 @@ public class CurrencyConversionService {
                     BigDecimal.ONE);
         }
 
-        BigDecimal rate = rateProvider.getExchangeRate(source, target);
+        // Both lookups are cached per single currency code, so EUR→X and
+        // X→EUR each cost one upstream call, X→Y costs at most two, and any
+        // subsequent pair sharing a currency is fully cache-served.
+        BigDecimal eurToSource = rateProvider.getEurRate(source);
+        BigDecimal eurToTarget = rateProvider.getEurRate(target);
 
-        // Convert: raw multiplication, then round to the target currency's
-        // default fraction digits with HALF_UP (standard banker-friendly mode
-        // for displayed money; not "banker's rounding" but the one the spec's
-        // NumberFormat default also uses).
-        BigDecimal converted = scale(amount.multiply(rate), targetIso);
+        // Effective source → target rate via EUR. setScale before multiply
+        // so the rate we expose has bounded precision; multiply then re-scales
+        // to the target currency's fraction digits.
+        BigDecimal effectiveRate = eurToTarget.divide(
+                eurToSource, CROSS_RATE_SCALE, RoundingMode.HALF_UP);
+
+        BigDecimal converted = scale(amount.multiply(effectiveRate), targetIso);
         String formatted = format(converted, targetIso);
 
-        log.info("Converted {} {} → {} {} (rate {})", amount, source, converted, target, rate);
+        log.info("Converted {} {} → {} {} (rate {})",
+                amount, source, converted, target, effectiveRate);
 
-        return new ConversionResponse(amount, source, target, converted, formatted, rate);
+        return new ConversionResponse(
+                amount, source, target, converted, formatted, effectiveRate);
     }
 
     private Currency resolveCurrency(String code) {

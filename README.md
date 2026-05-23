@@ -95,61 +95,46 @@ The Grafana datasource and the `Currency Converter` dashboard are auto-provision
 
 Assumes the app is running on `http://localhost:8080`.
 
-### Happy path
-
 ```bash
+# EUR to USD (direct EUR base)
+curl -sS -X POST http://localhost:8080/api/convert \
+  -H 'Content-Type: application/json' \
+  -d '{ "amount": 100.00, "sourceCurrency": "EUR", "targetCurrency": "USD" }'
+
+# USD to EUR (inverse of EUR base)
 curl -sS -X POST http://localhost:8080/api/convert \
   -H 'Content-Type: application/json' \
   -d '{ "amount": 100.00, "sourceCurrency": "USD", "targetCurrency": "EUR" }'
-```
 
-### Same source and target — short-circuits without calling swop.cx
+# USD to GBP (cross-rate via EUR)
+curl -sS -X POST http://localhost:8080/api/convert \
+  -H 'Content-Type: application/json' \
+  -d '{ "amount": 100.00, "sourceCurrency": "USD", "targetCurrency": "GBP" }'
 
-```bash
+# Same currency — short-circuits without calling swop.cx
 curl -sS -X POST http://localhost:8080/api/convert \
   -H 'Content-Type: application/json' \
   -d '{ "amount": 42.50, "sourceCurrency": "USD", "targetCurrency": "USD" }'
-```
 
-### Lowercase codes — silently normalised to uppercase
-
-```bash
+# Lowercase codes — silently normalised to uppercase
 curl -sS -X POST http://localhost:8080/api/convert \
   -H 'Content-Type: application/json' \
   -d '{ "amount": 50, "sourceCurrency": "usd", "targetCurrency": "eur" }'
-```
 
-### Zero-decimal currency (JPY) — proves no hardcoded scale
-
-```bash
+# JPY — zero-decimal currency
 curl -sS -X POST http://localhost:8080/api/convert \
   -H 'Content-Type: application/json' \
-  -d '{ "amount": 10, "sourceCurrency": "USD", "targetCurrency": "JPY" }'
-```
+  -d '{ "amount": 100, "sourceCurrency": "EUR", "targetCurrency": "JPY" }'
 
-### Validation failure → 400
-
-```bash
+# Validation failure → 400
 curl -i -X POST http://localhost:8080/api/convert \
   -H 'Content-Type: application/json' \
   -d '{ "amount": -5, "sourceCurrency": "USD", "targetCurrency": "EUR" }'
-```
 
-### Unknown ISO code → 422
-
-```bash
+# Unknown ISO code → 422
 curl -i -X POST http://localhost:8080/api/convert \
   -H 'Content-Type: application/json' \
   -d '{ "amount": 1, "sourceCurrency": "ZZZ", "targetCurrency": "EUR" }'
-```
-
-### Pretty-print with jq
-
-```bash
-curl -sS -X POST http://localhost:8080/api/convert \
-  -H 'Content-Type: application/json' \
-  -d '{ "amount": 100, "sourceCurrency": "USD", "targetCurrency": "EUR" }' \
-  | jq
 ```
 
 ### Actuator endpoints
@@ -160,6 +145,15 @@ curl -sS http://localhost:8080/actuator/metrics | jq
 curl -sS http://localhost:8080/actuator/metrics/cache.hit.rate | jq
 curl -sS http://localhost:8080/actuator/metrics/swop.response.time | jq
 ```
+
+## API constraints
+
+**swop.cx free tier:** The free plan only supports EUR as the base
+currency. This API handles non-EUR source currencies transparently
+using cross-rate calculation: both the source and target EUR-based
+rates are fetched independently and the effective source→target rate
+is derived from their ratio. The caller does not need to be aware of
+this implementation detail.
 
 ## Tests
 

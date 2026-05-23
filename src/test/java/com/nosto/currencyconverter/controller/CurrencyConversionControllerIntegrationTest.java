@@ -33,6 +33,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
  * WireMock stands in for swop.cx so the test is hermetic — no network calls,
  * no real API key, no flakiness from upstream rate updates.
  *
+ * All stubs use the EUR-base URL pattern that the new SwopClient calls:
+ *   GET /rest/rates/EUR/{currencyCode}
+ *
  * The cache is cleared before each test (@BeforeEach) so that one test's
  * cached rate doesn't satisfy another test's request and skew the WireMock
  * call counts.
@@ -83,11 +86,33 @@ class CurrencyConversionControllerIntegrationTest {
         }
     }
 
-    // ---------- happy path ------------------------------------------------
+    // ---------- happy paths -----------------------------------------------
 
     @Test
-    void validInput_returns200AndCorrectResponseStructure() throws Exception {
-        stubRate("USD", "EUR", "0.92");
+    void eurToUsd_appliesEurBasedRateDirectly() throws Exception {
+        // EUR is the source — only EUR/USD must be fetched.
+        stubEurRate("USD", "1.08");
+
+        mockMvc.perform(post("/api/convert")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "amount": 100.00, "sourceCurrency": "EUR", "targetCurrency": "USD" }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sourceCurrency").value("EUR"))
+                .andExpect(jsonPath("$.targetCurrency").value("USD"))
+                // 100 * 1.08 = 108.00
+                .andExpect(jsonPath("$.convertedAmount").value(108.00))
+                .andExpect(jsonPath("$.exchangeRate").value(1.08))
+                .andExpect(jsonPath("$.formattedAmount", notNullValue()));
+
+        wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/rates/EUR/USD")));
+    }
+
+    @Test
+    void usdToEur_invertsEurBasedRate() throws Exception {
+        // USD is the source — only EUR/USD must be fetched, then inverted.
+        stubEurRate("USD", "1.08");
 
         mockMvc.perform(post("/api/convert")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -95,12 +120,29 @@ class CurrencyConversionControllerIntegrationTest {
                                 { "amount": 100.00, "sourceCurrency": "USD", "targetCurrency": "EUR" }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.amount").value(100.00))
-                .andExpect(jsonPath("$.sourceCurrency").value("USD"))
-                .andExpect(jsonPath("$.targetCurrency").value("EUR"))
-                .andExpect(jsonPath("$.convertedAmount").value(92.00))
-                .andExpect(jsonPath("$.exchangeRate").value(0.92))
-                .andExpect(jsonPath("$.formattedAmount", notNullValue()));
+                // 100 * (1 / 1.08) = 92.59259... → 92.59
+                .andExpect(jsonPath("$.convertedAmount").value(92.59));
+
+        wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/rates/EUR/USD")));
+    }
+
+    @Test
+    void usdToGbp_computesCrossRateViaEur() throws Exception {
+        // Neither source nor target is EUR — both EUR-based rates must be fetched.
+        stubEurRate("USD", "1.08");
+        stubEurRate("GBP", "0.86");
+
+        mockMvc.perform(post("/api/convert")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "amount": 100.00, "sourceCurrency": "USD", "targetCurrency": "GBP" }
+                                """))
+                .andExpect(status().isOk())
+                // 100 * (0.86 / 1.08) = 79.6296... → 79.63
+                .andExpect(jsonPath("$.convertedAmount").value(79.63));
+
+        wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/rates/EUR/USD")));
+        wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/rates/EUR/GBP")));
     }
 
     // ---------- validation 400s -------------------------------------------
@@ -133,7 +175,7 @@ class CurrencyConversionControllerIntegrationTest {
     @Test
     void lowercaseCurrencyCodes_returns200() throws Exception {
         // WireMock stub matches the uppercased path — proves normalisation occurred.
-        stubRate("USD", "EUR", "0.92");
+        stubEurRate("USD", "1.08");
 
         mockMvc.perform(post("/api/convert")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -144,7 +186,7 @@ class CurrencyConversionControllerIntegrationTest {
                 .andExpect(jsonPath("$.sourceCurrency").value("USD"))
                 .andExpect(jsonPath("$.targetCurrency").value("EUR"));
 
-        wireMock.verify(getRequestedFor(urlPathEqualTo("/rest/rates/USD/EUR")));
+        wireMock.verify(getRequestedFor(urlPathEqualTo("/rest/rates/EUR/USD")));
     }
 
     // ---------- same-currency short-circuit -------------------------------
@@ -160,15 +202,15 @@ class CurrencyConversionControllerIntegrationTest {
                 .andExpect(jsonPath("$.convertedAmount").value(42.00))
                 .andExpect(jsonPath("$.exchangeRate").value(1));
 
-        // Assert zero calls to swop.cx — verifies the short-circuit.
-        wireMock.verify(exactly(0), getRequestedFor(urlPathEqualTo("/rest/rates/USD/USD")));
+        // Zero calls of any kind — verifies the short-circuit.
+        wireMock.verify(exactly(0), getRequestedFor(urlPathEqualTo("/rest/rates/EUR/USD")));
     }
 
     // ---------- upstream failure ------------------------------------------
 
     @Test
     void swopReturns503_apiReturns503() throws Exception {
-        wireMock.stubFor(get(urlPathEqualTo("/rest/rates/USD/EUR"))
+        wireMock.stubFor(get(urlPathEqualTo("/rest/rates/EUR/USD"))
                 .willReturn(aResponse().withStatus(503)));
 
         mockMvc.perform(post("/api/convert")
@@ -180,11 +222,28 @@ class CurrencyConversionControllerIntegrationTest {
                 .andExpect(jsonPath("$.status").value(503));
     }
 
+    @Test
+    void swopReturns404_apiReturns422() throws Exception {
+        // ISO code that swop.cx doesn't support → 404 upstream → 422 to caller.
+        // (We use "XTS" which is the ISO 4217 reserved code for testing —
+        // valid in Java's Currency table, so the upfront check doesn't fire.)
+        wireMock.stubFor(get(urlPathEqualTo("/rest/rates/EUR/XTS"))
+                .willReturn(aResponse().withStatus(404)));
+
+        mockMvc.perform(post("/api/convert")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "amount": 1, "sourceCurrency": "EUR", "targetCurrency": "XTS" }
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
+    }
+
     // ---------- caching ---------------------------------------------------
 
     @Test
     void duplicateRequest_hitsSwopOnlyOnce() throws Exception {
-        stubRate("USD", "EUR", "0.92");
+        stubEurRate("USD", "1.08");
 
         for (int i = 0; i < 3; i++) {
             mockMvc.perform(post("/api/convert")
@@ -196,23 +255,52 @@ class CurrencyConversionControllerIntegrationTest {
         }
 
         // Three API calls in, one upstream call out. That is the cache working.
-        wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/rates/USD/EUR")));
+        wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/rates/EUR/USD")));
+    }
+
+    @Test
+    void cachedRateIsReusedAcrossDifferentPairs() throws Exception {
+        // The per-currency cache key (vs the old per-pair key) means an
+        // EUR/USD rate fetched for USD→GBP is reusable for USD→EUR and
+        // GBP→USD afterwards. This test pins down that behaviour.
+        stubEurRate("USD", "1.08");
+        stubEurRate("GBP", "0.86");
+
+        // Pair 1: USD → GBP fetches both EUR/USD and EUR/GBP (cache miss × 2).
+        postConvert("USD", "GBP");
+        // Pair 2: USD → EUR reuses cached EUR/USD; EUR side needs no lookup.
+        postConvert("USD", "EUR");
+        // Pair 3: GBP → USD reuses both cached entries.
+        postConvert("GBP", "USD");
+
+        // Net upstream calls: one EUR/USD, one EUR/GBP — despite three conversions.
+        wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/rates/EUR/USD")));
+        wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/rates/EUR/GBP")));
     }
 
     // ---------- helpers ---------------------------------------------------
 
-    private void stubRate(String base, String quote, String rate) {
-        wireMock.stubFor(get(urlPathEqualTo("/rest/rates/" + base + "/" + quote))
+    private void stubEurRate(String quote, String rate) {
+        wireMock.stubFor(get(urlPathEqualTo("/rest/rates/EUR/" + quote))
                 .willReturn(aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {
-                                  "base_currency": "%s",
+                                  "base_currency": "EUR",
                                   "quote_currency": "%s",
                                   "quote": %s,
                                   "date": "2026-05-23"
                                 }
-                                """.formatted(base, quote, rate))));
+                                """.formatted(quote, rate))));
+    }
+
+    private void postConvert(String source, String target) throws Exception {
+        mockMvc.perform(post("/api/convert")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "amount": 10, "sourceCurrency": "%s", "targetCurrency": "%s" }
+                                """.formatted(source, target)))
+                .andExpect(status().isOk());
     }
 }
