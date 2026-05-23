@@ -1,0 +1,12 @@
+# Auto-provisioned data source. Grafana picks this up at startup so the
+# dashboard works without anyone clicking through the UI.
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    database: currency_converter
+    isDefault: true
+    editable: true

@@ -1,0 +1,58 @@
+# InfluxDB 1.8 is used (not 2.x) because Micrometer's micrometer-registry-influx
+# speaks the 1.x line-protocol API natively; 2.x would require the OSS v2 token
+# plumbing and a different Micrometer registry artifact. The spec calls this out
+# explicitly.
+services:
+
+  influxdb:
+    image: influxdb:1.8
+    container_name: cc-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      # Auto-create the database the app writes to so we don't have to
+      # `influx -execute "CREATE DATABASE..."` after every fresh start.
+      INFLUXDB_DB: currency_converter
+      INFLUXDB_HTTP_AUTH_ENABLED: "false"
+    healthcheck:
+      # /ping is InfluxDB 1.x's standard liveness endpoint.
+      test: ["CMD", "curl", "-sf", "http://localhost:8086/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: cc-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      # Default admin/admin for the assignment; would be a secret in production.
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # Skip the "change password" first-run nag — irrelevant for a local demo.
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+    volumes:
+      # Datasource + dashboard provisioning so Grafana boots fully configured.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      influxdb:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cc-app
+    ports:
+      - "8080:8080"
+    environment:
+      # API key must be supplied at runtime — never baked into the image.
+      SWOP_API_KEY: ${SWOP_API_KEY}
+      # Override the Influx URI for in-network DNS (vs. localhost on host).
+      MANAGEMENT_INFLUX_METRICS_EXPORT_URI: http://influxdb:8086
+      MANAGEMENT_INFLUX_METRICS_EXPORT_ENABLED: "true"
+    depends_on:
+      influxdb:
+        condition: service_healthy

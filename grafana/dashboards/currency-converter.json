@@ -1,0 +1,115 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Conversion request rate",
+      "type": "timeseries",
+      "datasource": { "type": "influxdb", "uid": "InfluxDB" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "SELECT non_negative_derivative(mean(\"count\"), 1s) FROM \"conversion_requests_total\" WHERE $timeFilter GROUP BY time(10s) fill(null)",
+          "rawQuery": true,
+          "resultFormat": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Validation error count (per field)",
+      "type": "timeseries",
+      "datasource": { "type": "influxdb", "uid": "InfluxDB" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "SELECT non_negative_derivative(mean(\"count\"), 1s) FROM \"conversion_validation_errors\" WHERE $timeFilter GROUP BY time(10s), \"field\" fill(null)",
+          "rawQuery": true,
+          "resultFormat": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "swop.cx response latency (p50, p95, p99)",
+      "type": "timeseries",
+      "datasource": { "type": "influxdb", "uid": "InfluxDB" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "SELECT mean(\"phi_0_5\"), mean(\"phi_0_95\"), mean(\"phi_0_99\") FROM \"swop_response_time\" WHERE $timeFilter GROUP BY time(10s) fill(null)",
+          "rawQuery": true,
+          "resultFormat": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "swop.cx error rate",
+      "type": "timeseries",
+      "datasource": { "type": "influxdb", "uid": "InfluxDB" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "SELECT non_negative_derivative(mean(\"count\"), 1s) FROM \"swop_errors_total\" WHERE $timeFilter GROUP BY time(10s) fill(null)",
+          "rawQuery": true,
+          "resultFormat": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Cache hit rate",
+      "type": "stat",
+      "datasource": { "type": "influxdb", "uid": "InfluxDB" },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.8 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "SELECT last(\"value\") FROM \"cache_hit_rate\" WHERE $timeFilter",
+          "rawQuery": true,
+          "resultFormat": "time_series"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "tags": ["currency-converter"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Currency Converter",
+  "uid": "currency-converter",
+  "version": 1,
+  "weekStart": ""
+}
