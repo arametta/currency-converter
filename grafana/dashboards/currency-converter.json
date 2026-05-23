@@ -9,15 +9,15 @@
   "panels": [
     {
       "id": 1,
-      "title": "Conversion request rate",
+      "title": "Conversion requests (cumulative)",
       "type": "timeseries",
       "datasource": { "type": "influxdb", "uid": "InfluxDB" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "fieldConfig": { "defaults": { "unit": "short" } },
       "targets": [
         {
           "refId": "A",
-          "query": "SELECT non_negative_derivative(mean(\"count\"), 1s) FROM \"conversion_requests_total\" WHERE $timeFilter GROUP BY time(10s) fill(null)",
+          "query": "SELECT last(\"count\") FROM \"conversion_requests_total\" WHERE $timeFilter GROUP BY time(10s) fill(previous)",
           "rawQuery": true,
           "resultFormat": "time_series"
         }
@@ -25,14 +25,15 @@
     },
     {
       "id": 2,
-      "title": "Validation error count (per field)",
+      "title": "Validation errors (cumulative, per field)",
       "type": "timeseries",
       "datasource": { "type": "influxdb", "uid": "InfluxDB" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
       "targets": [
         {
           "refId": "A",
-          "query": "SELECT non_negative_derivative(mean(\"count\"), 1s) FROM \"conversion_validation_errors\" WHERE $timeFilter GROUP BY time(10s), \"field\" fill(null)",
+          "query": "SELECT last(\"count\") FROM \"conversion_validation_errors\" WHERE $timeFilter GROUP BY time(10s), \"field\" fill(previous)",
           "rawQuery": true,
           "resultFormat": "time_series"
         }
@@ -56,15 +57,15 @@
     },
     {
       "id": 4,
-      "title": "swop.cx error rate",
+      "title": "swop.cx errors (cumulative)",
       "type": "timeseries",
       "datasource": { "type": "influxdb", "uid": "InfluxDB" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "fieldConfig": { "defaults": { "unit": "short" } },
       "targets": [
         {
           "refId": "A",
-          "query": "SELECT non_negative_derivative(mean(\"count\"), 1s) FROM \"swop_errors_total\" WHERE $timeFilter GROUP BY time(10s) fill(null)",
+          "query": "SELECT last(\"count\") FROM \"swop_errors_total\" WHERE $timeFilter GROUP BY time(10s) fill(previous)",
           "rawQuery": true,
           "resultFormat": "time_series"
         }

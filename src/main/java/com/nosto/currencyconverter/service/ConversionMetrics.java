@@ -7,8 +7,6 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import io.micrometer.core.instrument.Tags;
-import jakarta.annotation.PostConstruct;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.caffeine.CaffeineCache;
 import org.springframework.stereotype.Component;
@@ -21,10 +19,13 @@ import org.springframework.stereotype.Component;
  * call into it rather than touching MeterRegistry directly — keeps metric
  * names and tag conventions consistent across the codebase.
  *
- * The gauge on cache.hit.rate is registered at @PostConstruct time so that
- * the underlying Caffeine cache exists (CaffeineCacheManager creates caches
- * lazily on first call OR eagerly if names are pre-declared, which we do
- * in CacheConfig).
+ * Eager registration: every metric (counters and gauge) is registered in the
+ * constructor so that /actuator/metrics/{name} returns a value from boot —
+ * not 404 until the first matching request arrives. For tagged counters
+ * (conversion.requests.total, conversion.validation.errors) the constructor
+ * registers a zero-count placeholder with no tags; real tagged variants are
+ * still created on increment. Actuator's aggregate query sums across all
+ * variants, so the placeholder (always 0) doesn't affect totals.
  *
  * Cardinality note: tagging conversion.requests.total with both source and
  * target currency yields up to ~190 * 189 ≈ 36k series. That's tolerable for
@@ -43,39 +44,54 @@ public class ConversionMetrics {
     private final MeterRegistry registry;
     private final CacheManager cacheManager;
 
+    // swop.errors.total has no dynamic tags → safe to cache one Counter
+    // reference and reuse it for every increment.
+    private final Counter swopErrors;
+
     public ConversionMetrics(MeterRegistry registry, CacheManager cacheManager) {
         this.registry = registry;
         this.cacheManager = cacheManager;
-    }
 
-    @PostConstruct
-    void registerCacheHitRateGauge() {
+        // Tagless counter — cached and incremented in place.
+        this.swopErrors = Counter.builder(METRIC_SWOP_ERRORS)
+                .description("Total swop.cx call failures")
+                .register(registry);
+
+        // Zero-count placeholders so /actuator/metrics/{name} is browseable
+        // from startup. Real tagged variants are created lazily on increment;
+        // the aggregate sum is unaffected because these stay at 0.
+        Counter.builder(METRIC_REQUESTS)
+                .description("Total conversion requests received")
+                .register(registry);
+        Counter.builder(METRIC_VALIDATION_ERRORS)
+                .description("Validation failures by request field")
+                .register(registry);
+
+        // Gauge: read the live Caffeine stats on each scrape. Registered here
+        // rather than in @PostConstruct so all metric registration is in one
+        // place and ordering with other beans is explicit (the CacheManager is
+        // already constructed when this constructor runs).
         Gauge.builder(METRIC_CACHE_HIT_RATE, this, ConversionMetrics::cacheHitRate)
                 .description("Caffeine exchangeRates cache hit ratio (0.0–1.0)")
                 .register(registry);
     }
 
     public void recordConversionRequest(String sourceCurrency, String targetCurrency) {
-        Counter.builder(METRIC_REQUESTS)
-                .description("Total conversion requests received")
-                .tags(Tags.of("sourceCurrency", sourceCurrency, "targetCurrency", targetCurrency))
-                .register(registry)
-                .increment();
+        // Micrometer caches counters by (name, tags) inside the registry, so
+        // this lookup is O(1) after the first call for any given pair. Using
+        // the registry.counter(...) shorthand is equivalent to Counter.builder
+        // but avoids one Builder allocation per call.
+        registry.counter(METRIC_REQUESTS,
+                "sourceCurrency", sourceCurrency,
+                "targetCurrency", targetCurrency).increment();
     }
 
     public void recordValidationError(String field) {
-        Counter.builder(METRIC_VALIDATION_ERRORS)
-                .description("Validation failures by request field")
-                .tags(Tags.of("field", field))
-                .register(registry)
-                .increment();
+        registry.counter(METRIC_VALIDATION_ERRORS, "field", field).increment();
     }
 
     public void recordSwopError() {
-        Counter.builder(METRIC_SWOP_ERRORS)
-                .description("Total swop.cx call failures")
-                .register(registry)
-                .increment();
+        swopErrors.increment();
     }
 
     /**

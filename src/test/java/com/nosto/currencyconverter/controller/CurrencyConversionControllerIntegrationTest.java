@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,6 +53,7 @@ class CurrencyConversionControllerIntegrationTest {
 
     @Autowired MockMvc mockMvc;
     @Autowired CacheManager cacheManager;
+    @Autowired MeterRegistry meterRegistry;
 
     @BeforeAll
     static void startWireMock() {
@@ -276,6 +278,68 @@ class CurrencyConversionControllerIntegrationTest {
         // Net upstream calls: one EUR/USD, one EUR/GBP — despite three conversions.
         wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/rates/EUR/USD")));
         wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/rates/EUR/GBP")));
+    }
+
+    // ---------- metrics ---------------------------------------------------
+    // Pins down that the custom counters in ConversionMetrics actually
+    // increment on the live MeterRegistry — not just on a mock.
+
+    @Test
+    void conversionRequestsCounter_incrementsAfterSuccessfulConversion() throws Exception {
+        stubEurRate("USD", "1.08");
+
+        double before = meterRegistry.find("conversion.requests.total")
+                .tags("sourceCurrency", "USD", "targetCurrency", "EUR")
+                .counters().stream().mapToDouble(c -> c.count()).sum();
+
+        postConvert("USD", "EUR");
+
+        double after = meterRegistry.find("conversion.requests.total")
+                .tags("sourceCurrency", "USD", "targetCurrency", "EUR")
+                .counters().stream().mapToDouble(c -> c.count()).sum();
+
+        org.assertj.core.api.Assertions.assertThat(after - before).isEqualTo(1.0);
+    }
+
+    @Test
+    void validationErrorsCounter_incrementsOnBadRequest() throws Exception {
+        double before = meterRegistry.find("conversion.validation.errors")
+                .tag("field", "amount")
+                .counters().stream().mapToDouble(c -> c.count()).sum();
+
+        mockMvc.perform(post("/api/convert")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "amount": -1, "sourceCurrency": "USD", "targetCurrency": "EUR" }
+                                """))
+                .andExpect(status().isBadRequest());
+
+        double after = meterRegistry.find("conversion.validation.errors")
+                .tag("field", "amount")
+                .counters().stream().mapToDouble(c -> c.count()).sum();
+
+        org.assertj.core.api.Assertions.assertThat(after - before).isEqualTo(1.0);
+    }
+
+    @Test
+    void swopErrorsCounter_incrementsOnUpstreamFailure() throws Exception {
+        wireMock.stubFor(get(urlPathEqualTo("/rest/rates/EUR/USD"))
+                .willReturn(aResponse().withStatus(503)));
+
+        double before = meterRegistry.find("swop.errors.total")
+                .counters().stream().mapToDouble(c -> c.count()).sum();
+
+        mockMvc.perform(post("/api/convert")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "amount": 1, "sourceCurrency": "USD", "targetCurrency": "EUR" }
+                                """))
+                .andExpect(status().isServiceUnavailable());
+
+        double after = meterRegistry.find("swop.errors.total")
+                .counters().stream().mapToDouble(c -> c.count()).sum();
+
+        org.assertj.core.api.Assertions.assertThat(after - before).isEqualTo(1.0);
     }
 
     // ---------- helpers ---------------------------------------------------
