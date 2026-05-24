@@ -81,10 +81,13 @@ class CurrencyConversionControllerIntegrationTest {
     @BeforeEach
     void resetState() {
         wireMock.resetAll();
-        // Evict any rate cached by a previous test so each test sees a clean slate.
-        var cache = cacheManager.getCache("exchangeRates");
-        if (cache != null) {
-            cache.clear();
+        // Evict every cache so one test's cached value doesn't satisfy
+        // another's request and skew WireMock call counts.
+        for (String name : new String[]{"exchangeRates", "currencies"}) {
+            var cache = cacheManager.getCache(name);
+            if (cache != null) {
+                cache.clear();
+            }
         }
     }
 
@@ -342,6 +345,63 @@ class CurrencyConversionControllerIntegrationTest {
         org.assertj.core.api.Assertions.assertThat(after - before).isEqualTo(1.0);
     }
 
+    // ---------- /api/currencies -------------------------------------------
+
+    @Test
+    void currenciesEndpoint_returnsActiveCurrenciesSortedByCode() throws Exception {
+        stubCurrencies("""
+                [
+                  { "code": "USD", "name": "United States dollar", "numeric_code": "840", "decimal_digits": 2, "active": true },
+                  { "code": "XAF", "name": "CFA franc BEAC",       "numeric_code": "950", "decimal_digits": 0, "active": false },
+                  { "code": "EUR", "name": "Euro",                  "numeric_code": "978", "decimal_digits": 2, "active": true },
+                  { "code": "GBP", "name": "Pound sterling",        "numeric_code": "826", "decimal_digits": 2, "active": true }
+                ]
+                """);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/currencies"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$[0].code").value("EUR"))
+                .andExpect(jsonPath("$[1].code").value("GBP"))
+                .andExpect(jsonPath("$[2].code").value("USD"))
+                // active and numeric_code must NOT leak into the public DTO
+                .andExpect(jsonPath("$[0].active").doesNotExist())
+                .andExpect(jsonPath("$[0].numeric_code").doesNotExist())
+                .andExpect(jsonPath("$[0].decimal_digits").doesNotExist());
+    }
+
+    @Test
+    void currenciesEndpoint_returnsServiceUnavailableWhenSwopFails() throws Exception {
+        wireMock.stubFor(get(urlPathEqualTo("/rest/currencies"))
+                .willReturn(aResponse().withStatus(503)));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/currencies"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value(503));
+    }
+
+    @Test
+    void currenciesEndpoint_isCachedAcrossRequests() throws Exception {
+        // The "currencies" cache (24h TTL) means /api/currencies should only
+        // hit swop.cx on the first call; subsequent calls are cache-served.
+        stubCurrencies("""
+                [
+                  { "code": "EUR", "name": "Euro", "numeric_code": "978", "decimal_digits": 2, "active": true }
+                ]
+                """);
+
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                            .get("/api/currencies"))
+                    .andExpect(status().isOk());
+        }
+
+        // Three API calls in, one upstream call out.
+        wireMock.verify(exactly(1), getRequestedFor(urlPathEqualTo("/rest/currencies")));
+    }
+
     // ---------- helpers ---------------------------------------------------
 
     private void stubEurRate(String quote, String rate) {
@@ -357,6 +417,14 @@ class CurrencyConversionControllerIntegrationTest {
                                   "date": "2026-05-23"
                                 }
                                 """.formatted(quote, rate))));
+    }
+
+    private void stubCurrencies(String jsonBody) {
+        wireMock.stubFor(get(urlPathEqualTo("/rest/currencies"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody(jsonBody)));
     }
 
     private void postConvert(String source, String target) throws Exception {

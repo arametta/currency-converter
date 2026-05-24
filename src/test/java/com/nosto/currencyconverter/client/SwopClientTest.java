@@ -9,8 +9,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.nosto.currencyconverter.model.SwopCurrencyResponse;
 import com.nosto.currencyconverter.model.SwopRateResponse;
 import java.math.BigDecimal;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -130,6 +132,62 @@ class SwopClientTest {
                 .thenReturn(ResponseEntity.ok(null));
 
         assertThatThrownBy(() -> client.getEurRate("USD"))
+                .isInstanceOf(ExchangeRateUnavailableException.class);
+    }
+
+    // ---- getCurrencies ---------------------------------------------------
+
+    @Test
+    void getCurrencies_returnsDeserialisedListIncludingInactiveEntries() {
+        // The client doesn't filter — that's CurrencyService's job. Verify
+        // both active and inactive entries pass through unchanged.
+        SwopCurrencyResponse[] body = new SwopCurrencyResponse[]{
+                new SwopCurrencyResponse("USD", "United States dollar", true),
+                new SwopCurrencyResponse("XAF", "CFA franc BEAC", false),
+                new SwopCurrencyResponse("EUR", "Euro", true)
+        };
+        when(restTemplate.exchange(
+                contains("/rest/currencies"),
+                eq(HttpMethod.GET),
+                any(HttpEntity.class),
+                eq(SwopCurrencyResponse[].class)))
+                .thenReturn(ResponseEntity.ok(body));
+
+        List<SwopCurrencyResponse> result = client.getCurrencies();
+
+        assertThat(result).hasSize(3);
+        assertThat(result).extracting(SwopCurrencyResponse::code)
+                .containsExactly("USD", "XAF", "EUR");
+    }
+
+    @Test
+    void getCurrencies_serverError_throwsExchangeRateUnavailable() {
+        when(restTemplate.exchange(any(String.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SwopCurrencyResponse[].class)))
+                .thenThrow(HttpServerErrorException.create(
+                        HttpStatus.INTERNAL_SERVER_ERROR, "Boom", null, null, null));
+
+        assertThatThrownBy(() -> client.getCurrencies())
+                .isInstanceOf(ExchangeRateUnavailableException.class);
+    }
+
+    @Test
+    void getCurrencies_networkTimeout_throwsExchangeRateUnavailable() {
+        when(restTemplate.exchange(any(String.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SwopCurrencyResponse[].class)))
+                .thenThrow(new ResourceAccessException("Connection refused"));
+
+        assertThatThrownBy(() -> client.getCurrencies())
+                .isInstanceOf(ExchangeRateUnavailableException.class);
+    }
+
+    @Test
+    void getCurrencies_emptyBody_throwsExchangeRateUnavailable() {
+        when(restTemplate.exchange(any(String.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                eq(SwopCurrencyResponse[].class)))
+                .thenReturn(ResponseEntity.ok(null));
+
+        assertThatThrownBy(() -> client.getCurrencies())
                 .isInstanceOf(ExchangeRateUnavailableException.class);
     }
 }

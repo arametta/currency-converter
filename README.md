@@ -14,14 +14,14 @@ Built as a technical assignment for a Nosto Software Team Lead interview.
 | Framework       | Spring Boot 3.4.1                       |
 | Build           | Maven (wrapper bundled — `./mvnw`)      |
 | HTTP client     | `RestTemplate`                          |
-| Cache           | Caffeine (in-memory, 5-min TTL)         |
+| Cache           | Caffeine (rates 5min, currencies 24h)   |
 | Validation      | Jakarta Bean Validation                 |
 | Tests           | JUnit 5 + Mockito + WireMock            |
 | Metrics         | Micrometer → InfluxDB 1.8 → Grafana     |
 
-## Endpoint
+## Endpoints
 
-`POST /api/convert`
+### `POST /api/convert`
 
 Request:
 ```json
@@ -44,6 +44,23 @@ Error envelope (400 / 422 / 503 / 500):
 ```json
 { "status": 400, "errors": ["amount: amount must be positive"] }
 ```
+
+### `GET /api/currencies`
+
+Returns the list of supported currencies, sourced from swop.cx and cached
+for 24 hours. Used by the frontend to populate dropdowns without exposing
+the swop.cx API key to the browser.
+
+Example response (200):
+```json
+[
+  { "code": "EUR", "name": "Euro" },
+  { "code": "GBP", "name": "Pound sterling" },
+  { "code": "USD", "name": "United States dollar" }
+]
+```
+
+Only active currencies are returned, sorted alphabetically by code.
 
 ### Status codes
 
@@ -135,6 +152,9 @@ curl -i -X POST http://localhost:8080/api/convert \
 curl -i -X POST http://localhost:8080/api/convert \
   -H 'Content-Type: application/json' \
   -d '{ "amount": 1, "sourceCurrency": "ZZZ", "targetCurrency": "EUR" }'
+
+# List supported currencies (cached 24h server-side)
+curl -sS http://localhost:8080/api/currencies | jq
 ```
 
 ### Actuator endpoints
