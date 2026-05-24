@@ -12,26 +12,9 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 /**
- * Serves the GET /api/currencies endpoint.
- *
- * Three things happen here, in order:
- *   1. Fetch the raw list from swop.cx via SwopClient
- *   2. Drop entries flagged inactive — swop.cx still lists deprecated codes
- *      (e.g. legacy/withdrawn currencies) and we don't want them in the
- *      frontend dropdown
- *   3. Map to CurrencyInfo (narrow public DTO) and sort by code alphabetically
- *
- * Caching: the result is held for 24h in the "currencies" cache configured in
- * CacheConfig. The currency catalogue changes on geopolitical timescales, so
- * 24h is conservative. Caching at the service layer (not the client) means
- * filtering and sorting are also memoised — no per-request CPU spent on a
- * known-stable list.
- *
- * Why @Cacheable here and not on SwopClient.getCurrencies(): the same rule
- * that applies to ExchangeRateProvider — @Cacheable only fires for calls
- * that cross a Spring proxy boundary. The controller calls into this bean
- * (cross-bean → proxy fires); SwopClient calls would also work, but the
- * cleaner place is the layer that owns the post-fetch shaping.
+ * Serves GET /api/currencies. Fetches from swop.cx, filters to active
+ * entries only, maps to CurrencyInfo, sorts by code, and caches for 24h.
+ * Caching at the service layer means filtering and sorting are also memoised.
  */
 @Service
 public class CurrencyService {

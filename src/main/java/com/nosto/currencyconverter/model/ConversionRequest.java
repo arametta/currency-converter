@@ -8,14 +8,9 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 
 /**
- * Inbound request body for POST /api/convert.
- *
- * Validation is declarative via Jakarta Bean Validation; the controller triggers
- * it with @Valid, and any violations are turned into a 400 response by
- * GlobalExceptionHandler. No manual if-checks in the controller or service.
- *
- * Currency codes are accepted in any case here; the service layer normalises
- * them to uppercase before doing anything with them (silent correction, per spec).
+ * Request body for POST /api/convert.
+ * Validation is declarative via Jakarta Bean Validation — no manual
+ * if-checks in the controller or service.
  */
 public record ConversionRequest(
 

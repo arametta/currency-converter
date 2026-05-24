@@ -12,25 +12,15 @@ import org.springframework.cache.caffeine.CaffeineCache;
 import org.springframework.stereotype.Component;
 
 /**
- * Application metrics surface.
+ * Central place to register and update Micrometer meters. Other classes
+ * call into this bean rather than touching MeterRegistry directly so metric
+ * names and tag conventions stay consistent.
  *
- * One central place to register and update Micrometer meters. Other classes
- * (service, exception handler, client) hold a reference to this bean and
- * call into it rather than touching MeterRegistry directly — keeps metric
- * names and tag conventions consistent across the codebase.
+ * All meters are registered eagerly in the constructor so /actuator/metrics
+ * shows them from startup, not just after the first matching request.
  *
- * Eager registration: every metric (counters and gauge) is registered in the
- * constructor so that /actuator/metrics/{name} returns a value from boot —
- * not 404 until the first matching request arrives. For tagged counters
- * (conversion.requests.total, conversion.validation.errors) the constructor
- * registers a zero-count placeholder with no tags; real tagged variants are
- * still created on increment. Actuator's aggregate query sums across all
- * variants, so the placeholder (always 0) doesn't affect totals.
- *
- * Cardinality note: tagging conversion.requests.total with both source and
- * target currency yields up to ~190 * 189 ≈ 36k series. That's tolerable for
- * InfluxDB at this traffic level. If we onboard high-volume customers the
- * tags can be dropped or aggregated.
+ * Note: tagging conversion.requests.total by both currencies creates up to
+ * ~36k series. Fine at demo scale; at real scale you'd drop or aggregate tags.
  */
 @Component
 public class ConversionMetrics {
@@ -77,10 +67,6 @@ public class ConversionMetrics {
     }
 
     public void recordConversionRequest(String sourceCurrency, String targetCurrency) {
-        // Micrometer caches counters by (name, tags) inside the registry, so
-        // this lookup is O(1) after the first call for any given pair. Using
-        // the registry.counter(...) shorthand is equivalent to Counter.builder
-        // but avoids one Builder allocation per call.
         registry.counter(METRIC_REQUESTS,
                 "sourceCurrency", sourceCurrency,
                 "targetCurrency", targetCurrency).increment();

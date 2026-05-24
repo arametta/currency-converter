@@ -14,25 +14,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Orchestrates a single conversion: normalise → validate codes → short-circuit
- * same-currency → fetch EUR-based rates (cached) → cross-rate → format → respond.
- *
- * Because the swop.cx free tier only supports EUR as the base currency, every
- * upstream lookup is anchored on EUR. For an arbitrary source → target pair
- * the effective rate is derived from the two EUR-based rates:
- *
- *     effectiveRate = eurToTarget / eurToSource
- *     convertedAmount = amount * effectiveRate
- *
- * The three cases reduce to the same formula:
- *   - EUR → X : eurToSource = 1, so effectiveRate = eurToTarget
- *   - X → EUR : eurToTarget = 1, so effectiveRate = 1 / eurToSource
- *   - X → Y  : general case, both rates fetched (cache hit on either side
- *               after the first lookup for that currency)
- *
- * All cache, normalisation, and cross-rate decisions live here. The controller
- * knows nothing about any of this, and the client knows nothing about caching,
- * cross-rates, or currency normalisation.
+ * Handles a single conversion request. Normalises currency codes,
+ * short-circuits same-currency pairs, and derives the source→target
+ * rate via EUR: effectiveRate = eurToTarget / eurToSource.
+ * All caching happens in ExchangeRateProvider.
  */
 @Service
 public class CurrencyConversionService {
@@ -61,15 +46,9 @@ public class CurrencyConversionService {
         String source = request.sourceCurrency().toUpperCase(Locale.ROOT);
         String target = request.targetCurrency().toUpperCase(Locale.ROOT);
 
-        // Metric recorded with normalised codes so that "USD" and "usd" don't
-        // produce two separate time series.
         metrics.recordConversionRequest(source, target);
 
-        // Reject unknown ISO codes BEFORE touching swop.cx — avoids burning
-        // an API call on something we already know is bad and gives the
-        // client a deterministic 422. Source is validated for its side
-        // effect (throwing); only the target is used downstream for
-        // locale-aware formatting and rounding.
+        // Validate both codes before touching swop.cx — 422 is cheaper than an API call.
         resolveCurrency(source);
         Currency targetIso = resolveCurrency(target);
 

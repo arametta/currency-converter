@@ -20,29 +20,10 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 /**
- * Thin HTTP adapter around swop.cx.
- *
- * Swop.cx's free tier only supports EUR as the base currency, so this client
- * exposes a single method that always fetches the EUR → currencyCode rate:
- *     GET {base-url}/rest/rates/EUR/{currencyCode}
- *
- * Cross-rate conversion for non-EUR pairs is handled one level up in
- * CurrencyConversionService by composing two EUR-based rates. Keeping that
- * arithmetic out of this class preserves single responsibility — this class
- * speaks HTTP and translates failures, nothing else.
- *
- * Failure translation:
- *   404 from swop.cx → UnknownCurrencyException (valid ISO code, unsupported by swop.cx)
- *   other 4xx        → ExchangeRateUnavailableException
- *   5xx              → ExchangeRateUnavailableException
- *   network/timeout  → ExchangeRateUnavailableException
- *   empty body       → ExchangeRateUnavailableException
- *
- * A second method, getCurrencies(), fetches the full currency catalogue from
- * GET {base-url}/rest/currencies. It is intentionally not part of the rate-
- * fetch hot path — its caller (CurrencyService) caches the result for 24h.
- * This adapter just deserialises and returns the raw upstream list; filtering
- * (active vs inactive) is a business decision made one level up.
+ * HTTP adapter for swop.cx. Always fetches EUR-based rates —
+ * the free tier doesn't support other base currencies.
+ * Translates HTTP failures into domain exceptions so callers
+ * don't need to know about RestTemplate.
  */
 @Component
 public class SwopClient {
@@ -76,9 +57,7 @@ public class SwopClient {
             return BigDecimal.ONE;
         }
 
-        // UriComponentsBuilder URL-encodes path segments. Combined with the
-        // @Pattern alphabetic check in ConversionRequest, this defends against
-        // any injection into the upstream URL.
+        // URL-encodes path segments and prevents injection into the upstream URL.
         String url = UriComponentsBuilder.fromUriString(baseUrl)
                 .pathSegment("rest", "rates", EUR, currencyCode)
                 .toUriString();
@@ -134,18 +113,6 @@ public class SwopClient {
         }
     }
 
-    /**
-     * Fetches the full currency catalogue from swop.cx.
-     *
-     * Returns the raw deserialised list including both active and inactive
-     * entries. The active/inactive filter and any reshaping into a public
-     * DTO happens in CurrencyService — this method's responsibility is
-     * limited to "talk HTTP and translate failures."
-     *
-     * Failure translation is uniform with getEurRate: every wire-level
-     * problem becomes ExchangeRateUnavailableException, which the global
-     * handler maps to 503.
-     */
     public List<SwopCurrencyResponse> getCurrencies() {
         String url = UriComponentsBuilder.fromUriString(baseUrl)
                 .pathSegment("rest", "currencies")

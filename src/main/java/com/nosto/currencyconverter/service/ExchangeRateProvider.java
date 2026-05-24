@@ -37,12 +37,7 @@ public class ExchangeRateProvider {
         this.metrics = metrics;
     }
 
-    /**
-     * @Cacheable intercepts before the method body, so this body — and the
-     * timer it runs — only executes on cache misses. That's the right scope
-     * for "swop.cx response time": we don't want sub-millisecond cache hits
-     * polluting the latency distribution.
-     */
+    // Timer only fires on cache misses — we want swop.cx latency, not cache hit latency.
     @Cacheable(value = "exchangeRates", key = "#currencyCode")
     public BigDecimal getEurRate(String currencyCode) {
         log.debug("Cache miss — fetching EUR/{} from swop.cx", currencyCode);
