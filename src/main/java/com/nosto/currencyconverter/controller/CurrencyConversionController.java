@@ -38,19 +38,15 @@ public class CurrencyConversionController {
         this.currencyService = currencyService;
     }
 
+    /**
+     * Converts a monetary amount from one currency to another.
+     */
     @PostMapping("/convert")
     public ResponseEntity<ConversionResponse> convert(@Valid @RequestBody ConversionRequest request) {
         return ResponseEntity.ok(conversionService.convert(request));
     }
 
-    /**
-     * Catalogue endpoint. Sourced from swop.cx, filtered to active entries,
-     * sorted by code, cached 24h. Used by the frontend to populate the
-     * source/target dropdowns without exposing the swop.cx API key.
-     *
-     * Failures bubble through GlobalExceptionHandler:
-     *   swop.cx down → 503 (ExchangeRateUnavailableException already mapped)
-     */
+    // Cached 24h. API key stays on the server — frontend fetches from here, not swop.cx directly.
     @GetMapping("/currencies")
     public ResponseEntity<List<CurrencyInfo>> currencies() {
         return ResponseEntity.ok(currencyService.getAvailableCurrencies());

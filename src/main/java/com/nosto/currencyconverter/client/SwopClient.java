@@ -31,7 +31,7 @@ public class SwopClient {
     private static final Logger log = LoggerFactory.getLogger(SwopClient.class);
     private static final String EUR = "EUR";
 
-    // All injected dependencies are final + constructor-injected (per spec).
+    // All injected dependencies are final + constructor-injected.
     private final RestTemplate restTemplate;
     private final String baseUrl;
     private final String apiKey;
