@@ -9,7 +9,7 @@
   "panels": [
     {
       "id": 1,
-      "title": "Conversion requests (cumulative)",
+      "title": "Conversion requests (cumulative, per currency pair)",
       "type": "timeseries",
       "datasource": { "type": "influxdb", "uid": "InfluxDB" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
@@ -17,7 +17,7 @@
       "targets": [
         {
           "refId": "A",
-          "query": "SELECT last(\"count\") FROM \"conversion_requests_total\" WHERE $timeFilter GROUP BY time(10s) fill(previous)",
+          "query": "SELECT last(\"value\") FROM \"conversion_requests_total\" WHERE $timeFilter GROUP BY time(10s), \"sourceCurrency\", \"targetCurrency\" fill(previous)",
           "rawQuery": true,
           "resultFormat": "time_series"
         }
@@ -33,7 +33,7 @@
       "targets": [
         {
           "refId": "A",
-          "query": "SELECT last(\"count\") FROM \"conversion_validation_errors\" WHERE $timeFilter GROUP BY time(10s), \"field\" fill(previous)",
+          "query": "SELECT last(\"value\") FROM \"conversion_validation_errors\" WHERE $timeFilter GROUP BY time(10s), \"field\" fill(previous)",
           "rawQuery": true,
           "resultFormat": "time_series"
         }
@@ -49,7 +49,7 @@
       "targets": [
         {
           "refId": "A",
-          "query": "SELECT mean(\"phi_0_5\"), mean(\"phi_0_95\"), mean(\"phi_0_99\") FROM \"swop_response_time\" WHERE $timeFilter GROUP BY time(10s) fill(null)",
+          "query": "SELECT mean(\"value\") FROM \"swop_response_time_percentile\" WHERE $timeFilter GROUP BY time(10s), \"phi\" fill(null)",
           "rawQuery": true,
           "resultFormat": "time_series"
         }
@@ -65,7 +65,7 @@
       "targets": [
         {
           "refId": "A",
-          "query": "SELECT last(\"count\") FROM \"swop_errors_total\" WHERE $timeFilter GROUP BY time(10s) fill(previous)",
+          "query": "SELECT last(\"value\") FROM \"swop_errors_total\" WHERE $timeFilter GROUP BY time(10s) fill(previous)",
           "rawQuery": true,
           "resultFormat": "time_series"
         }

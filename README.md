@@ -146,6 +146,52 @@ curl -sS http://localhost:8080/actuator/metrics/cache.hit.rate | jq
 curl -sS http://localhost:8080/actuator/metrics/swop.response.time | jq
 ```
 
+### InfluxDB inspection
+
+Useful when a Grafana panel is empty — check whether the data is actually
+reaching InfluxDB before suspecting the dashboard query.
+
+```bash
+# Sanity check: Influx is up
+curl -sS http://localhost:8086/ping -i | head -3
+
+# All measurements published by the app
+curl -sS -G http://localhost:8086/query \
+  --data-urlencode 'db=currency_converter' \
+  --data-urlencode 'q=SHOW MEASUREMENTS' | jq
+
+# Fields and tags on a specific measurement
+curl -sS -G http://localhost:8086/query \
+  --data-urlencode 'db=currency_converter' \
+  --data-urlencode 'q=SHOW FIELD KEYS FROM "conversion_requests_total"' | jq
+
+curl -sS -G http://localhost:8086/query \
+  --data-urlencode 'db=currency_converter' \
+  --data-urlencode 'q=SHOW TAG KEYS FROM "conversion_requests_total"' | jq
+
+# Latest count per currency pair
+curl -sS -G http://localhost:8086/query \
+  --data-urlencode 'db=currency_converter' \
+  --data-urlencode 'q=SELECT last("value") FROM "conversion_requests_total" GROUP BY "sourceCurrency","targetCurrency"' | jq
+
+# swop.cx call latency percentiles (separate measurement, tagged by phi)
+curl -sS -G http://localhost:8086/query \
+  --data-urlencode 'db=currency_converter' \
+  --data-urlencode 'q=SELECT last("value") FROM "swop_response_time_percentile" GROUP BY "phi"' | jq
+
+# Current Caffeine cache hit rate
+curl -sS -G http://localhost:8086/query \
+  --data-urlencode 'db=currency_converter' \
+  --data-urlencode 'q=SELECT last("value") FROM "cache_hit_rate"' | jq
+```
+
+Notes:
+- Field name is `value` for counters and gauges (Micrometer convention).
+  Timers use `count`, `sum`, `mean`, `upper`; percentiles are written
+  to a separate `<timer>_percentile` measurement tagged by `phi`.
+- Metric names with dots in code (e.g. `conversion.requests.total`)
+  become underscores in Influx (`conversion_requests_total`).
+
 ## API constraints
 
 **swop.cx free tier:** The free plan only supports EUR as the base
