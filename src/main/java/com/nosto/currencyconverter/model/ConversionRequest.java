@@ -1,5 +1,6 @@
 package com.nosto.currencyconverter.model;
 
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -18,6 +19,7 @@ public record ConversionRequest(
         // floating-point rounding error on currency math.
         @NotNull(message = "amount must not be null")
         @Positive(message = "amount must be positive")
+        @DecimalMax(value = "999999999999.99", message = "amount must be a realistic value")
         BigDecimal amount,
 
         // ISO 4217 alpha-3 code. The @Pattern enforces letters only so we

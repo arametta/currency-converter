@@ -134,7 +134,7 @@ const formattedAmount = computed(() =>
 
       <div class="field">
         <label for="amount">Amount</label>
-        <input id="amount" type="number" v-model.number="amount" min="0" step="0.01" />
+        <input id="amount" type="number" v-model.number="amount" min="0" max="999999999999.99" step="0.001" />
       </div>
 
       <button type="submit" :disabled="converting">

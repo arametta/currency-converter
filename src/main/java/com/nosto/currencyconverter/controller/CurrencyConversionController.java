@@ -46,7 +46,10 @@ public class CurrencyConversionController {
         return ResponseEntity.ok(conversionService.convert(request));
     }
 
-    // Cached 24h. API key stays on the server — frontend fetches from here, not swop.cx directly.
+    /**
+     * Returns a list of all available currencies.
+     * Cached 24h. API key stays on the server — frontend fetches from here, not swop.cx directly.
+     */
     @GetMapping("/currencies")
     public ResponseEntity<List<CurrencyInfo>> currencies() {
         return ResponseEntity.ok(currencyService.getAvailableCurrencies());
