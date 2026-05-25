@@ -312,16 +312,15 @@ decimal places, some currencies have 3. Hardcoding 2 gives wrong results.
 **Formatted amount is rendered with `Intl.NumberFormat` on the frontend.**
 The backend still returns a pre-formatted `formattedAmount` string (using 
 `java.text.NumberFormat`) so non-browser clients have something usable, but
-the UI re-formats client-side via the browser's `Intl.NumberFormat` —
-that's the canonical "Web i18n" API and it respects the user's browser
+the UI re-formats client-side via the browser's `Intl.NumberFormat`.
+It's the canonical "Web i18n" API and it respects the user's browser
 locale automatically.
 
-**Amount is capped at 999,999,999,999.99 via `@DecimalMax`.** Beyond ~9
-quadrillion JavaScript loses integer precision in IEEE 754 doubles and
-the input renders in scientific notation. The cap is well below that and
-also keeps the API honest: no realistic conversion needs more than a
-trillion units. The UI mirrors it with `max="999999999999.99"` as a hint,
-but the backend is the actual authority.
+**Amount is capped at 999,999,999,999.99 via `@DecimalMax`.** No realistic
+currency conversion needs more than a trillion units. Without a cap, 
+very large numbers cause rendering issues in the frontend. The browser 
+displays them in scientific notation. The UI mirrors it with
+`max="999999999999.99"` as a hint.
 
 **`GET /api/currencies` proxied through the backend.** The frontend needs
 a currency list for the dropdowns. Fetching it directly from swop.cx in
