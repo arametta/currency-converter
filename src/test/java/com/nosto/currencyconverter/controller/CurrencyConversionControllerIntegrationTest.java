@@ -175,6 +175,18 @@ class CurrencyConversionControllerIntegrationTest {
                 .andExpect(jsonPath("$.status").value(400));
     }
 
+    @Test
+    void amountAboveCap_returns400WithMeaningfulMessage() throws Exception {
+        mockMvc.perform(post("/api/convert")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "amount": 1000000000000, "sourceCurrency": "USD", "targetCurrency": "EUR" }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.errors[0]", containsString("realistic")));
+    }
+
     // ---------- normalisation ---------------------------------------------
 
     @Test

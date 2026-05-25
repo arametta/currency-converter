@@ -191,4 +191,26 @@ class CurrencyConversionServiceTest {
         assertThat(violations).extracting(v -> v.getPropertyPath().toString())
                 .contains("targetCurrency");
     }
+
+    @Test
+    void amountAboveCap_failsValidation() {
+        // Cap is 999,999,999,999.99 — one over is invalid.
+        Set<ConstraintViolation<ConversionRequest>> violations = validator.validate(
+                new ConversionRequest(new BigDecimal("1000000000000"), "USD", "EUR"));
+
+        assertThat(violations).extracting(v -> v.getPropertyPath().toString())
+                .contains("amount");
+        assertThat(violations).extracting(ConstraintViolation::getMessage)
+                .anyMatch(m -> m.contains("realistic"));
+    }
+
+    @Test
+    void amountAtCap_passesValidation() {
+        // Boundary: @DecimalMax is inclusive by default — the cap itself is valid.
+        Set<ConstraintViolation<ConversionRequest>> violations = validator.validate(
+                new ConversionRequest(new BigDecimal("999999999999.99"), "USD", "EUR"));
+
+        assertThat(violations).extracting(v -> v.getPropertyPath().toString())
+                .doesNotContain("amount");
+    }
 }
